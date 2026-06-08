@@ -1,8 +1,10 @@
 from flask import Blueprint, request, jsonify
-import asyncio
 import os
+import asyncio
 
 from database import query_one, execute
+
+assign_role_bp = Blueprint("assign_role", __name__)
 
 @assign_role_bp.route("/reward/<int:roblox_id>", methods=["GET"])
 def reward(roblox_id):

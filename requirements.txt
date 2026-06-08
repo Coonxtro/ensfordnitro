@@ -1,0 +1,9 @@
+flask
+discord.py
+python-dotenv
+requests
+waitress
+beautifulsoup4
+pillow
+asyncio
+aiohttp

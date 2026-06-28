@@ -16,6 +16,7 @@ from discord import Intents
 from discord.ext import commands
 from waitress import serve
 from api.assign_role import assign_role_bp
+from api.monitor import monitor_bp
 from database import init_db
 import keep_alive  # importamos el módulo completo para exponer `keep_alive.app`
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 # --- Flask principal ---
 app = Flask(__name__)
 app.register_blueprint(assign_role_bp)
+app.register_blueprint(monitor_bp)
 
 # --- Discord Bot ---
 intents = Intents.default()

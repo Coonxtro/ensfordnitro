@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.register_blueprint(assign_role_bp)
 app.register_blueprint(monitor_bp)
-
+import asyncio
+from api.monitor import check_server_end
 # --- Discord Bot ---
 intents = Intents.default()
 intents.guilds = True
@@ -65,6 +66,11 @@ def run_api_server():
 
 # --- Main ---
 async def setup_hook():
+    await bot.wait_until_ready()
+    while True:
+        check_server_end(bot)
+        await asyncio.sleep(5)
+    bot.loop.create_task(monitor_loop())
     print("loading link")
     await bot.load_extension("cogs.link")
 

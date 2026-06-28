@@ -2,7 +2,12 @@ from flask import Blueprint, request, jsonify, render_template_string
 import os
 
 monitor_bp = Blueprint("monitor", __name__)
-
+import time
+import asyncio
+last_update = 0
+server_start = time.time()
+max_players = 0
+server_active = False
 live_players = []
 
 HTML = """
@@ -70,7 +75,7 @@ def players():
 
 @monitor_bp.route("/server/update", methods=["POST"])
 def update():
-    global live_players
+    global live_players, last_update, server_start, max_players, server_active
 
     if request.headers.get("X-API-Key") != os.getenv("API_KEY"):
         return jsonify({"error": "unauthorized"}), 401
@@ -79,6 +84,20 @@ def update():
     if not data:
         return jsonify({"error": "no data"}), 400
 
-    live_players = data.get("players", [])
+    players = data.get("players", [])
+    live_players = players
+
+    now = time.time()
+
+    # detect new server start
+    if not server_active:
+        server_start = now
+        server_active = True
+
+    last_update = now
+
+    # track peak players
+    if len(players) > max_players:
+        max_players = len(players)
 
     return jsonify({"success": True})

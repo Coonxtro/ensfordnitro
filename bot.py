@@ -3,9 +3,10 @@ import time
 import asyncio
 import logging
 from threading import Thread
+import discord
 from dotenv import load_dotenv
 from flask import Flask
-from discord import Intents
+from discord import Intents, guild
 from discord.ext import commands
 from waitress import serve
 
@@ -51,7 +52,10 @@ async def setup_hook():
 
     bot.loop.create_task(monitor_loop())
 
-    await bot.tree.sync()
+    #await bot.tree.sync()
+    guild = discord.Object(id=778045351260455022)
+    synced = await bot.tree.sync(guild=guild)
+    print(f"Synced {len(synced)} commands")
 
 
 @bot.event

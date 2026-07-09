@@ -41,6 +41,7 @@ async def setup_hook():
     await bot.load_extension("cogs.link")
     await bot.load_extension("cogs.unlink")
     await bot.load_extension("cogs.claimboost")
+    await bot.load_extension("cogs.update")
 
     async def monitor_loop():
         await bot.wait_until_ready()

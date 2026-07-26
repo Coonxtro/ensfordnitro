@@ -11,7 +11,7 @@ from discord.ext import commands
 from waitress import serve
 
 from api.assign_role import assign_role_bp
-from api.monitor import monitor_bp, check_server_end
+from api.monitor import monitor_bp, check_server_end, get_game_status
 from database import init_db
 
 load_dotenv()
@@ -37,21 +37,47 @@ def run_api():
 
 
 @bot.event
+
+async def monitor_loop():
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            check_server_end(bot)
+
+            game_status = get_game_status()
+            player_count = game_status["player_count"]
+            build = game_status["build"]
+
+            if player_count > 0:
+                player_word = "player" if player_count == 1 else "players"
+
+                activity = discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name=f"{player_count} {player_word} in Ensford"
+                )
+            else:
+                activity = discord.Game(
+                    name=f"Ensford | Build {build}"
+                )
+
+            await bot.change_presence(
+                status=discord.Status.online,
+                activity=activity
+            )
+
+        except Exception:
+            logging.exception("Failed to update monitor status")
+
+        await asyncio.sleep(15)
+
 async def setup_hook():
 
     await bot.load_extension("cogs.link")
     await bot.load_extension("cogs.unlink")
     await bot.load_extension("cogs.claimboost")
     await bot.load_extension("cogs.update")
-
-    async def monitor_loop():
-        await bot.wait_until_ready()
-        while True:
-            check_server_end(bot)
-            await asyncio.sleep(5)
-
     bot.loop.create_task(monitor_loop())
-
     #await bot.tree.sync()
     guild = discord.Object(id=778045351260455022)
     synced = await bot.tree.sync(guild=guild)

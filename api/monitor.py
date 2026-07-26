@@ -7,9 +7,12 @@ monitor_bp = Blueprint("monitor", __name__)
 
 live_players = []
 last_update = 0
-server_start = time.time()
+server_start = 0
 max_players = 0
 server_active = False
+
+current_version = "Unknown"
+current_build = "Unknown"
 
 
 HTML = """
@@ -94,41 +97,59 @@ def players():
 
 @monitor_bp.route("/status")
 def status():
-    online = (time.time() - last_update) < 15
-    return jsonify({
-        "online": online,
-        "players": len(live_players)
-    })
+    return jsonify(get_game_status())
 
 
 @monitor_bp.route("/server/update", methods=["POST"])
 def update():
-
-    global live_players, last_update, server_start, max_players, server_active
+    global live_players
+    global last_update
+    global server_start
+    global max_players
+    global server_active
+    global current_version
+    global current_build
 
     if request.headers.get("X-API-Key") != os.getenv("API_KEY"):
         return jsonify({"error": "unauthorized"}), 401
 
     data = request.get_json(silent=True)
+
     if not data:
         return jsonify({"error": "no data"}), 400
 
     players = data.get("players", [])
+
     live_players = players
+    current_version = str(data.get("version", current_version))
+    current_build = str(data.get("build", current_build))
 
     now = time.time()
 
     if not server_active:
         server_start = now
+        max_players = 0
         server_active = True
 
     last_update = now
+    max_players = max(max_players, len(players))
 
-    if len(players) > max_players:
-        max_players = len(players)
+    return jsonify({
+        "success": True,
+        "players": len(players),
+        "version": current_version,
+        "build": current_build
+    })
 
-    return jsonify({"success": True})
+def get_game_status():
+    online = server_active and (time.time() - last_update < 25)
 
+    return {
+        "online": online,
+        "player_count": len(live_players) if online else 0,
+        "version": current_version,
+        "build": current_build
+    }
 
 def check_server_end(bot):
 
@@ -141,9 +162,9 @@ def check_server_end(bot):
         duration = int(now - server_start)
 
         msg = (
-            "📡 Server Ended\n"
-            f"⏱ Time: {duration}s\n"
-            f"👥 Peak Players: {max_players}"
+            "Server Ended\n"
+            f"Time: {duration}s\n"
+            f"Peak Players: {max_players}"
         )
 
         channel_id = int(os.getenv("LOG_CHANNEL_ID"))

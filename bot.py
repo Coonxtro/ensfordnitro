@@ -82,6 +82,7 @@ async def update_bot_status():
 async def setup_hook():
     await bot.load_extension("cogs.link")
     await bot.load_extension("cogs.unlink")
+    await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.claimboost")
     await bot.load_extension("cogs.update")
 

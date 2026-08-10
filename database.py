@@ -42,6 +42,25 @@ def init_db():
                 delivered INTEGER DEFAULT 0
             )
         """)
+        c.execute("""
+CREATE TABLE IF NOT EXISTS whitelist_applications(
+    discord_id TEXT PRIMARY KEY,
+    started_at INTEGER,
+    current_question INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active'
+)
+""")
+
+        c.execute("""
+CREATE TABLE IF NOT EXISTS whitelist_answers(
+    discord_id TEXT,
+    question_number INTEGER,
+    question TEXT,
+    answer TEXT,
+    PRIMARY KEY(discord_id, question_number)
+)
+""")
+
 
         conn.commit()
 

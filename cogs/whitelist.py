@@ -385,8 +385,10 @@ def _extract_join_request_id(item):
 
 def get_join_request_id(roblox_id):
     """
-    Lists pending requests and matches the applicant by Roblox user ID.
+    Lists pending Roblox group requests and tries to
+    match one to the applicant's Roblox user ID.
     """
+
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
         f"{ROBLOX_GROUP_ID}/join-requests"
@@ -401,13 +403,12 @@ def get_join_request_id(roblox_id):
     if not response.ok:
         raise RuntimeError(
             f"Roblox API returned {response.status_code}: "
-            f"{response.text[:500]}"
+            f"{response.text[:1000]}"
         )
 
     data = response.json()
-    requests_list = _extract_join_requests(data)
 
-    print("Join request count:", len(requests_list))
+    requests_list = _extract_join_requests(data)
 
     for item in requests_list:
         item_user_id = _find_user_id_in_request(item)
@@ -418,7 +419,14 @@ def get_join_request_id(roblox_id):
             if request_id:
                 return request_id
 
-    return None
+    # TEMPORARY DEBUG:
+    # If we couldn't find the applicant, send the actual
+    # Roblox response back through the error message.
+    raise RuntimeError(
+        "Could not match applicant to pending request.\n"
+        f"Applicant Roblox ID: {roblox_id}\n"
+        f"Roblox response: {str(data)[:1500]}"
+    )
 
 
 def accept_roblox_join_request(roblox_id):

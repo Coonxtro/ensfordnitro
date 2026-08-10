@@ -379,11 +379,9 @@ def get_join_request_id(roblox_id):
         )
 
     data = response.json()
-
-    print("ROBLOX JOIN REQUEST RESPONSE:")
-    print(data)
-
     requests_list = _extract_join_requests(data)
+
+    print("Join request count:", len(requests_list))
 
     for item in requests_list:
         item_user_id = _find_user_id_in_request(item)
@@ -401,10 +399,21 @@ def accept_roblox_join_request(roblox_id):
     join_request_id = get_join_request_id(roblox_id)
 
     if not join_request_id:
-        return False, (
-            "No pending Roblox group request was found "
-            "for this applicant."
-        )
+     url = (
+        f"https://apis.roblox.com/cloud/v2/groups/"
+        f"{ROBLOX_GROUP_ID}/join-requests"
+    )
+
+    response = requests.get(
+        url,
+        headers=roblox_headers(),
+        timeout=15
+    )
+
+    return False, (
+        "No matching pending request was found.\n\n"
+        f"Roblox returned:\n{response.text[:1500]}"
+    )
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"

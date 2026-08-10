@@ -379,6 +379,10 @@ def get_join_request_id(roblox_id):
         )
 
     data = response.json()
+
+    print("ROBLOX JOIN REQUEST RESPONSE:")
+    print(data)
+
     requests_list = _extract_join_requests(data)
 
     for item in requests_list:

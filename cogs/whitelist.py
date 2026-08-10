@@ -306,12 +306,22 @@ def _find_user_id_in_request(item):
     if not isinstance(item, dict):
         return None
 
-    # Common direct fields.
+    # Roblox currently returns:
+    # "user": "users/543040"
+    user_value = item.get("user")
+
+    if isinstance(user_value, str):
+        match = re.search(r"users/(\d+)", user_value)
+
+        if match:
+            return int(match.group(1))
+
+    # Fallbacks in case Roblox changes the response later
     for key in (
         "userId",
         "user_id",
         "requesterUserId",
-        "requester_user_id",
+        "requester_user_id"
     ):
         value = item.get(key)
 
@@ -321,35 +331,15 @@ def _find_user_id_in_request(item):
             except (TypeError, ValueError):
                 pass
 
-    # Nested user/requester objects.
-    for key in ("user", "requester"):
-        value = item.get(key)
+    if isinstance(user_value, dict):
+        for key in ("id", "userId", "user_id"):
+            value = user_value.get(key)
 
-        if isinstance(value, dict):
-            for id_key in ("id", "userId", "user_id"):
-                nested = value.get(id_key)
-
-                if nested is not None:
-                    try:
-                        return int(nested)
-                    except (TypeError, ValueError):
-                        pass
-
-        if isinstance(value, str):
-            match = re.search(r"/users/(\d+)", value)
-
-            if match:
-                return int(match.group(1))
-
-    # Search resource-name strings.
-    for key in ("name", "path"):
-        value = item.get(key)
-
-        if isinstance(value, str):
-            match = re.search(r"/users/(\d+)", value)
-
-            if match:
-                return int(match.group(1))
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    pass
 
     return None
 
@@ -358,27 +348,27 @@ def _extract_join_request_id(item):
     if not isinstance(item, dict):
         return None
 
+    path = item.get("path")
+
+    if isinstance(path, str):
+        match = re.search(
+            r"join-requests/(\d+)",
+            path
+        )
+
+        if match:
+            return match.group(1)
+
+    # Fallbacks
     for key in (
         "joinRequestId",
         "join_request_id",
-        "id",
+        "id"
     ):
         value = item.get(key)
 
         if value is not None:
             return str(value)
-
-    for key in ("name", "path"):
-        value = item.get(key)
-
-        if isinstance(value, str):
-            match = re.search(
-                r"join-requests/([^/:]+)",
-                value
-            )
-
-            if match:
-                return match.group(1)
 
     return None
 
@@ -403,7 +393,10 @@ def get_join_request_id(roblox_id):
 
     data = response.json()
 
-    requests_list = _extract_join_requests(data)
+    requests_list = data.get(
+        "groupJoinRequests",
+        []
+    )
 
     for item in requests_list:
         item_user_id = _find_user_id_in_request(item)
@@ -416,8 +409,7 @@ def get_join_request_id(roblox_id):
 
     raise RuntimeError(
         "Could not match applicant to a pending request.\n"
-        f"Applicant Roblox ID: {roblox_id}\n"
-        f"Roblox response: {str(data)[:1500]}"
+        f"Applicant Roblox ID: {roblox_id}"
     )
 
 

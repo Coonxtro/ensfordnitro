@@ -83,17 +83,18 @@ async def update_bot_status():
 async def setup_hook():
     await bot.load_extension("cogs.link")
     await bot.load_extension("cogs.unlink")
-    await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.claimboost")
-    await bot.load_extension("cogs.update")
+    await bot.load_extension("cogs.updatelog")
+    await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.verify")
-    await bot.load_extension("cogs.updatepost")
+    await bot.load_extension("cogs.updateroles")
 
-    asyncio.create_task(update_bot_status())
+    guild = discord.Object(id=778045351260455022)
 
-    guild = discord.Object(id=GUILD_ID)
+    # Clear old guild commands first
+    bot.tree.clear_commands(guild=guild)
 
-    # Copies global commands into the test server
+    # Copy current global commands into this guild
     bot.tree.copy_global_to(guild=guild)
 
     synced = await bot.tree.sync(guild=guild)
@@ -101,7 +102,7 @@ async def setup_hook():
     print(f"Synced {len(synced)} commands")
 
     for command in synced:
-        print(f"Synced command: /{command.name}")
+        print(f"/{command.name}")
 
 
 # This must be outside setup_hook

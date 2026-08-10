@@ -1,125 +1,105 @@
-import json
-import os
 import discord
+
 from discord.ext import commands
 from discord import app_commands
 
-UPDATE_CHANNEL_ID = int(os.getenv("UPDATE_CHANNEL_ID"))
+from database import query_one
+from role_sync import sync_group_role
 
 
-def bullets(text: str):
-    if not text.strip():
-        return "*None*"
-    return "\n".join(f"• {line.strip()}" for line in text.splitlines() if line.strip())
-
-
-def get_version():
-    try:
-        with open("version.json", "r") as f:
-            data = json.load(f)
-            return data["version"], data["build"]
-    except:
-        return "Unknown", "?"
-
-
-class UpdateModal(discord.ui.Modal, title="Publish Update"):
-
-    new_features = discord.ui.TextInput(
-        label="✨ New Features",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        placeholder="One feature per line"
-    )
-
-    qol = discord.ui.TextInput(
-        label="⚙️ Quality of Life",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        placeholder="One change per line"
-    )
-
-    bugfixes = discord.ui.TextInput(
-        label="🐛 Bug Fixes",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        placeholder="One fix per line"
-    )
-
-    notes = discord.ui.TextInput(
-        label="📝 Developer Notes",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        placeholder="Anything else..."
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-
-        version, build = get_version()
-
-        embed = discord.Embed(
-            title="🚀 ENSFORD UPDATE",
-            description=f"**Version:** `{version}` • **Build:** `#{build}`",
-            color=discord.Color.blue()
-        )
-
-        if self.new_features.value.strip():
-            embed.add_field(
-                name="✨ New Features",
-                value=bullets(self.new_features.value),
-                inline=False
-            )
-
-        if self.qol.value.strip():
-            embed.add_field(
-                name="⚙️ Quality of Life",
-                value=bullets(self.qol.value),
-                inline=False
-            )
-
-        if self.bugfixes.value.strip():
-            embed.add_field(
-                name="🐛 Bug Fixes",
-                value=bullets(self.bugfixes.value),
-                inline=False
-            )
-
-        if self.notes.value.strip():
-            embed.add_field(
-                name="📝 Developer Notes",
-                value=self.notes.value,
-                inline=False
-            )
-
-        embed.set_footer(
-            text=f"Published by {interaction.user.display_name}"
-        )
-
-        embed.timestamp = discord.utils.utcnow()
-
-        channel = interaction.client.get_channel(UPDATE_CHANNEL_ID)
-
-        await channel.send(embed=embed)
-
-        await interaction.response.send_message(
-            "✅ Update posted.",
-            ephemeral=True
-        )
-
-
-class Update(commands.Cog):
+class UpdateRoles(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
 
     @app_commands.command(
-        name="update",
-        description="Publish a game update."
+        name="updateroles",
+        description="Update your Discord roles from Roblox."
     )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def update(self, interaction: discord.Interaction):
+    async def updateroles(
+        self,
+        interaction: discord.Interaction
+    ):
+        await interaction.response.defer(
+            ephemeral=True
+        )
 
-        await interaction.response.send_modal(UpdateModal())
+        linked = query_one(
+            """
+            SELECT roblox_name, roblox_id
+            FROM verify
+            WHERE discord_id=?
+            """,
+            (
+                str(interaction.user.id),
+            )
+        )
+
+        if not linked:
+            await interaction.followup.send(
+                "❌ You are not verified. Use `/verify` first.",
+                ephemeral=True
+            )
+            return
+
+        roblox_name, roblox_id = linked
+
+        try:
+            result = await sync_group_role(
+                interaction.user,
+                roblox_id
+            )
+
+        except Exception as error:
+            await interaction.followup.send(
+                f"❌ Could not update roles:\n`{error}`",
+                ephemeral=True
+            )
+            return
+
+        if not result["success"]:
+            await interaction.followup.send(
+                f"⚠️ {result['message']}",
+                ephemeral=True
+            )
+            return
+
+        role_name = result.get(
+            "roblox_role",
+            "Unknown"
+        )
+
+        added = result.get(
+            "added",
+            []
+        )
+
+        if added:
+            changes = ", ".join(
+                added
+            )
+
+            message = (
+                "✅ **Roles Updated**\n\n"
+                f"Roblox: **{roblox_name}**\n"
+                f"Group Role: **{role_name}**\n"
+                f"Added: **{changes}**"
+            )
+
+        else:
+            message = (
+                "✅ **Roles Already Up to Date**\n\n"
+                f"Roblox: **{roblox_name}**\n"
+                f"Group Role: **{role_name}**"
+            )
+
+        await interaction.followup.send(
+            message,
+            ephemeral=True
+        )
 
 
 async def setup(bot):
-    await bot.add_cog(Update(bot))
+    await bot.add_cog(
+        UpdateRoles(bot)
+    )

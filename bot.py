@@ -87,6 +87,7 @@ async def setup_hook():
     await bot.load_extension("cogs.claimboost")
     await bot.load_extension("cogs.update")
     await bot.load_extension("cogs.verify")
+    await bot.load_extension("cogs.updatepost")
 
     asyncio.create_task(update_bot_status())
 

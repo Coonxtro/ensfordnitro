@@ -1,10 +1,12 @@
 import os
 import time
 import requests
+import asyncio
 
 from flask import Blueprint, request
 
 from database import query_one, execute
+from role_sync import sync_group_role
 
 
 oauth_bp = Blueprint(
@@ -274,6 +276,49 @@ def roblox_callback():
             str(discord_id)
         )
     )
+
+    try:
+        from bot import bot
+
+        guild_id = int(
+            os.getenv("GUILD_ID", "778045351260455022")
+        )
+
+        async def sync_after_verify():
+            guild = bot.get_guild(
+                guild_id
+            )
+
+            if not guild:
+                return
+
+            member = guild.get_member(
+                int(discord_id)
+            )
+
+            if not member:
+                try:
+                    member = await guild.fetch_member(
+                        int(discord_id)
+                    )
+                except Exception:
+                    return
+
+            await sync_group_role(
+                member,
+                roblox_id
+            )
+
+        asyncio.run_coroutine_threadsafe(
+            sync_after_verify(),
+            bot.loop
+        )
+
+    except Exception as error:
+        print(
+            "Role sync after verification failed:",
+            error
+        )
 
     execute(
         """

@@ -87,7 +87,7 @@ async def setup_hook():
     await bot.load_extension("cogs.updatelog")
     await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.verify")
-    await bot.load_extension("cogs.updateroles")
+    await bot.load_extension("cogs.update")
 
     guild = discord.Object(id=778045351260455022)
 

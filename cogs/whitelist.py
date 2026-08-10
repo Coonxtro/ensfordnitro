@@ -477,10 +477,9 @@ class Whitelist(commands.Cog):
             description=(
                 "Interested in becoming a whitelisted member of Ensford?\n\n"
                 "Press **Start Application** below to begin.\n\n"
-                "📨 The application will take place in your DMs.\n"
-                "⏱️ You will have **3 hours** to complete it.\n"
-                "🔞 Applicants must meet Ensford's age requirements.\n"
-                "🎙️ Roblox Voice Chat is required."
+                "The application will take place in your DMs.\n"
+                "You will have **3 hours** to complete it.\n"
+                "To join our community, you must fill out the Whitelist Application provided below and be approved by an Administrator before you can attend server startups. It is recommended that you review the Community Guidelines below to understand what you are getting into. You will be tested on specific rules in the Whitelist Application. Ensford is a 16+ voice chat community\n"
             ),
             color=discord.Color.blue()
         )

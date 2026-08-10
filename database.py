@@ -79,6 +79,13 @@ CREATE TABLE IF NOT EXISTS whitelist_review_messages(
 )
 """)
 
+        c.execute("""
+CREATE TABLE IF NOT EXISTS oauth_states(
+    state TEXT PRIMARY KEY,
+    discord_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+)
+""")
         conn.commit()
 
 

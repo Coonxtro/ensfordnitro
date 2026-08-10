@@ -14,7 +14,7 @@ from waitress import serve
 from api.assign_role import assign_role_bp
 from api.monitor import monitor_bp, check_server_end, get_game_status
 from database import init_db
-
+from api.oauth import oauth_bp
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -25,6 +25,7 @@ app = Flask(__name__)
 
 app.register_blueprint(assign_role_bp)
 app.register_blueprint(monitor_bp)
+app.register_blueprint(oauth_bp)
 
 intents = Intents.default()
 intents.guilds = True
@@ -85,6 +86,7 @@ async def setup_hook():
     await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.claimboost")
     await bot.load_extension("cogs.update")
+    await bot.load_extension("cogs.verify")
 
     asyncio.create_task(update_bot_status())
 

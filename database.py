@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS whitelist_reviews(
 )
 """)
 
+        c.execute("""
+CREATE TABLE IF NOT EXISTS whitelist_review_messages(
+    message_id TEXT PRIMARY KEY,
+    applicant_discord_id TEXT NOT NULL,
+    created_at INTEGER
+)
+""")
 
         conn.commit()
 

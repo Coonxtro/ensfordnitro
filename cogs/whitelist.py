@@ -85,17 +85,53 @@ def get_answer(discord_id, question_number):
 
 
 def get_applicant_id_from_message(message):
-    if not message.embeds:
-        return None
+    # First use the permanent database mapping.
+    row = query_one(
+        """
+        SELECT applicant_discord_id
+        FROM whitelist_review_messages
+        WHERE message_id=?
+        """,
+        (str(message.id),)
+    )
 
-    footer = message.embeds[-1].footer.text or ""
+    if row:
+        return int(row[0])
 
-    match = re.search(r"Applicant ID:\s*(\d+)", footer)
+    # Fallback for older applications created before
+    # the database mapping was added.
+    if message.embeds:
+        footer = message.embeds[-1].footer.text or ""
 
-    if not match:
-        return None
+        match = re.search(
+            r"Applicant ID:\s*(\d+)",
+            footer
+        )
 
-    return int(match.group(1))
+        if match:
+            applicant_id = int(match.group(1))
+
+            # Save it so future clicks survive restarts.
+            execute(
+                """
+                INSERT OR REPLACE INTO whitelist_review_messages
+                (
+                    message_id,
+                    applicant_discord_id,
+                    created_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                (
+                    str(message.id),
+                    str(applicant_id),
+                    int(time.time())
+                )
+            )
+
+            return applicant_id
+
+    return None
 
 
 def get_roblox_user_id(discord_id):
@@ -558,10 +594,27 @@ async def wait_for_change_response(
         )
     )
 
-    await review_channel.send(
-        embed=embed,
-        view=ReviewView(bot)
+    review_message = await review_channel.send(
+    embed=final_embed,
+    view=ReviewView(bot)
+)
+
+    execute(
+    """
+    INSERT OR REPLACE INTO whitelist_review_messages
+    (
+        message_id,
+        applicant_discord_id,
+        created_at
     )
+    VALUES (?, ?, ?)
+    """,
+    (
+        str(review_message.id),
+        str(user.id),
+        int(time.time())
+    )
+)
 
     save_review(
         applicant.id,
@@ -1516,10 +1569,27 @@ async def submit_application(
         )
     )
 
-    await review_channel.send(
-        embed=final_embed,
-        view=ReviewView(bot)
+    new_review_message = await review_channel.send(
+    embed=embed,
+    view=ReviewView(bot)
+)
+
+    execute(
+    """
+    INSERT OR REPLACE INTO whitelist_review_messages
+    (
+        message_id,
+        applicant_discord_id,
+        created_at
     )
+    VALUES (?, ?, ?)
+    """,
+    (
+        str(new_review_message.id),
+        str(applicant.id),
+        int(time.time())
+    )
+)
 
     finished = discord.Embed(
         title="✅ Application Submitted",

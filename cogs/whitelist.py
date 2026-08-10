@@ -384,11 +384,6 @@ def _extract_join_request_id(item):
 
 
 def get_join_request_id(roblox_id):
-    """
-    Lists pending Roblox group requests and tries to
-    match one to the applicant's Roblox user ID.
-    """
-
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
         f"{ROBLOX_GROUP_ID}/join-requests"
@@ -402,8 +397,8 @@ def get_join_request_id(roblox_id):
 
     if not response.ok:
         raise RuntimeError(
-            f"Roblox API returned {response.status_code}: "
-            f"{response.text[:1000]}"
+            f"Roblox list requests returned "
+            f"{response.status_code}: {response.text[:1000]}"
         )
 
     data = response.json()
@@ -419,11 +414,8 @@ def get_join_request_id(roblox_id):
             if request_id:
                 return request_id
 
-    # TEMPORARY DEBUG:
-    # If we couldn't find the applicant, send the actual
-    # Roblox response back through the error message.
     raise RuntimeError(
-        "Could not match applicant to pending request.\n"
+        "Could not match applicant to a pending request.\n"
         f"Applicant Roblox ID: {roblox_id}\n"
         f"Roblox response: {str(data)[:1500]}"
     )
@@ -432,16 +424,11 @@ def get_join_request_id(roblox_id):
 def accept_roblox_join_request(roblox_id):
     join_request_id = get_join_request_id(roblox_id)
 
-    response = requests.get(
-        url,
-        headers=roblox_headers(),
-        timeout=15
-    )
-
-    return False, (
-        "No matching pending request was found.\n\n"
-        f"Roblox returned:\n{response.text[:1500]}"
-    )
+    if not join_request_id:
+        raise RuntimeError(
+            f"No matching join request was found.\n"
+            f"Applicant Roblox ID: {roblox_id}"
+        )
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
@@ -459,9 +446,9 @@ def accept_roblox_join_request(roblox_id):
     if response.status_code in (200, 201, 204):
         return True, "Roblox group request accepted."
 
-    return False, (
-        f"Roblox returned HTTP {response.status_code}: "
-        f"{response.text[:500]}"
+    raise RuntimeError(
+        f"Roblox accept returned {response.status_code}: "
+        f"{response.text[:1000]}"
     )
 
 

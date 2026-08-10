@@ -432,12 +432,6 @@ def get_join_request_id(roblox_id):
 def accept_roblox_join_request(roblox_id):
     join_request_id = get_join_request_id(roblox_id)
 
-    if not join_request_id:
-     url = (
-        f"https://apis.roblox.com/cloud/v2/groups/"
-        f"{ROBLOX_GROUP_ID}/join-requests"
-    )
-
     response = requests.get(
         url,
         headers=roblox_headers(),

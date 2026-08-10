@@ -250,7 +250,10 @@ def get_join_request_id(roblox_id):
         timeout=15
     )
 
-    response.raise_for_status()
+    if not response.ok:
+     raise RuntimeError(
+        f"Roblox API returned {response.status_code}: {response.text}"
+    )
 
     data = response.json()
 

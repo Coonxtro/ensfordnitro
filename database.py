@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS whitelist_answers(
 )
 """)
 
+        c.execute("""
+CREATE TABLE IF NOT EXISTS whitelist_reviews(
+    discord_id TEXT PRIMARY KEY,
+    status TEXT,
+    reviewer_id TEXT,
+    reason TEXT,
+    reviewed_at INTEGER
+)
+""")
+
 
         conn.commit()
 

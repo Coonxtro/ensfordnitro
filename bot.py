@@ -84,7 +84,7 @@ async def setup_hook():
     await bot.load_extension("cogs.link")
     await bot.load_extension("cogs.unlink")
     await bot.load_extension("cogs.claimboost")
-    await bot.load_extension("cogs.updatelog")
+    await bot.load_extension("cogs.updatepost")
     await bot.load_extension("cogs.whitelist")
     await bot.load_extension("cogs.verify")
     await bot.load_extension("cogs.update")

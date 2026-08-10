@@ -13,7 +13,7 @@ class UpdateRoles(commands.Cog):
         self.bot = bot
 
     @app_commands.command(
-        name="updateroles",
+        name="update",
         description="Update your Discord roles from Roblox."
     )
     async def updateroles(

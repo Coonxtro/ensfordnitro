@@ -300,15 +300,13 @@ def get_join_request_id(roblox_id):
 
 
 def accept_roblox_join_request(roblox_id):
-    join_request_id = get_join_request_id(
-        roblox_id
-    )
-
-    if not join_request_id:
-        return False, (
-            "No pending Roblox group request was found "
-            "for this applicant."
+    if not ROBLOX_OPEN_CLOUD_KEY:
+        raise RuntimeError(
+            "ROBLOX_OPEN_CLOUD_KEY is not configured."
         )
+
+    # Roblox join_request_id is the requesting user's Roblox ID
+    join_request_id = str(roblox_id)
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
@@ -323,23 +321,28 @@ def accept_roblox_join_request(roblox_id):
         timeout=15
     )
 
-    if response.status_code not in (200, 201, 204):
+    if response.status_code in (200, 201, 204):
+        return True, "Roblox group request accepted."
+
+    if response.status_code == 404:
         return False, (
-            f"Roblox returned HTTP {response.status_code}: "
-            f"{response.text[:300]}"
+            "No pending Roblox group request was found "
+            "for this applicant."
         )
 
-    return True, "Roblox group request accepted."
+    return False, (
+        f"Roblox returned HTTP {response.status_code}: "
+        f"{response.text[:500]}"
+    )
 
 
 def decline_roblox_join_request(roblox_id):
-    join_request_id = get_join_request_id(
-        roblox_id
-    )
+    if not ROBLOX_OPEN_CLOUD_KEY:
+        raise RuntimeError(
+            "ROBLOX_OPEN_CLOUD_KEY is not configured."
+        )
 
-    if not join_request_id:
-        # Denial should still work even if they were never pending
-        return True, "No pending Roblox request existed."
+    join_request_id = str(roblox_id)
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
@@ -354,13 +357,16 @@ def decline_roblox_join_request(roblox_id):
         timeout=15
     )
 
-    if response.status_code not in (200, 201, 204):
-        return False, (
-            f"Roblox returned HTTP {response.status_code}: "
-            f"{response.text[:300]}"
-        )
+    if response.status_code in (200, 201, 204):
+        return True, "Roblox group request declined."
 
-    return True, "Roblox group request declined."
+    if response.status_code == 404:
+        return True, "No pending Roblox group request existed."
+
+    return False, (
+        f"Roblox returned HTTP {response.status_code}: "
+        f"{response.text[:500]}"
+    )
 
 
 def save_review(

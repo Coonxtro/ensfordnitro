@@ -2,6 +2,7 @@ import os
 import re
 import time
 import asyncio
+from discord import user
 import requests
 import discord
 
@@ -202,7 +203,32 @@ def staff_allowed(interaction):
 # ROBLOX HELPERS
 # ============================================================
 
+def get_roblox_id_from_message(message):
+    for embed in reversed(message.embeds):
+        footer = embed.footer.text or ""
+
+        match = re.search(
+            r"Roblox ID:\s*(\d+)",
+            footer
+        )
+
+        if match:
+            return int(match.group(1))
+
+    return None
+
 def get_roblox_user_id(discord_id):
+    linked = query_one(
+        """
+        SELECT roblox_id
+        FROM verify
+        WHERE discord_id=?
+        """,
+        (str(discord_id),)
+    )
+
+    if linked and linked[0]:
+        return int(linked[0])
     # First try the profile URL from question 2.
     profile = get_answer(discord_id, 1)
 
@@ -676,9 +702,12 @@ class DenyModal(
 
         reason = self.reason.value.strip()
 
-        roblox_id = get_roblox_user_id(
-            self.applicant_id
-        )
+        roblox_id = self.roblox_id
+
+        if not roblox_id:
+            roblox_id = get_roblox_user_id(
+        self.applicant_id
+    )
 
         roblox_message = (
             "No Roblox account could be resolved."
@@ -776,12 +805,13 @@ class AcceptModal(
         max_length=1000
     )
 
-    def __init__(self, bot, applicant_id, review_message):
+    def __init__(self,bot,applicant_id,review_message,roblox_id=None):
         super().__init__()
 
         self.bot = bot
         self.applicant_id = applicant_id
         self.review_message = review_message
+        self.roblox_id = roblox_id
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(
@@ -1000,13 +1030,18 @@ class ReviewView(discord.ui.View):
             )
             return
 
+        roblox_id = get_roblox_id_from_message(
+    interaction.message
+)
+
         await interaction.response.send_modal(
-            AcceptModal(
-                self.bot,
-                applicant_id,
-                interaction.message
-            )
-        )
+    AcceptModal(
+        self.bot,
+        applicant_id,
+        interaction.message,
+        roblox_id
+    )
+)
 
     @discord.ui.button(
         label="Deny",
@@ -1528,9 +1563,14 @@ async def submit_application(bot, user):
 
     final_embed = page_embeds[-1]
 
+    roblox_id = get_roblox_user_id(user.id)
+
     final_embed.set_footer(
-        text=f"Applicant ID: {user.id}"
+    text=(
+        f"Applicant ID: {user.id} | "
+        f"Roblox ID: {roblox_id if roblox_id else 'Unknown'}"
     )
+)
 
     new_review_message = await review_channel.send(
         embed=final_embed,

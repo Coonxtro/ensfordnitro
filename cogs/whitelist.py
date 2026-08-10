@@ -63,9 +63,9 @@ If so, who?"""
 ]
 
 
-# --------------------------------------------------
-# Helpers
-# --------------------------------------------------
+# ============================================================
+# DATABASE / BASIC HELPERS
+# ============================================================
 
 def expired(started_at):
     return int(time.time()) - int(started_at) >= APPLICATION_TIMEOUT
@@ -84,297 +84,7 @@ def get_answer(discord_id, question_number):
     return row[0] if row else None
 
 
-def get_applicant_id_from_message(message):
-    # First use the permanent database mapping.
-    row = query_one(
-        """
-        SELECT applicant_discord_id
-        FROM whitelist_review_messages
-        WHERE message_id=?
-        """,
-        (str(message.id),)
-    )
-
-    if row:
-        return int(row[0])
-
-    # Fallback for older applications created before
-    # the database mapping was added.
-    if message.embeds:
-        footer = message.embeds[-1].footer.text or ""
-
-        match = re.search(
-            r"Applicant ID:\s*(\d+)",
-            footer
-        )
-
-        if match:
-            applicant_id = int(match.group(1))
-
-            # Save it so future clicks survive restarts.
-            execute(
-                """
-                INSERT OR REPLACE INTO whitelist_review_messages
-                (
-                    message_id,
-                    applicant_discord_id,
-                    created_at
-                )
-                VALUES (?, ?, ?)
-                """,
-                (
-                    str(message.id),
-                    str(applicant_id),
-                    int(time.time())
-                )
-            )
-
-            return applicant_id
-
-    return None
-
-
-def get_roblox_user_id(discord_id):
-    # Question 2 should be their Roblox profile URL
-    profile = get_answer(discord_id, 1)
-
-    if profile:
-        match = re.search(
-            r"roblox\.com/users/(\d+)",
-            profile,
-            re.IGNORECASE
-        )
-
-        if match:
-            return int(match.group(1))
-
-    # Fallback to username from question 1
-    username = get_answer(discord_id, 0)
-
-    if not username:
-        return None
-
-    try:
-        roblox_id = fetch_roblox_id(username.strip())
-
-        if roblox_id:
-            return int(roblox_id)
-
-    except Exception:
-        pass
-
-    return None
-
-
-def roblox_headers():
-    return {
-        "x-api-key": ROBLOX_OPEN_CLOUD_KEY,
-        "Content-Type": "application/json"
-    }
-
-
-def contains_user_id(obj, target):
-    target = str(target)
-
-    if isinstance(obj, dict):
-
-        for key, value in obj.items():
-
-            key_lower = key.lower()
-
-            if key_lower in (
-                "userid",
-                "user_id",
-                "user",
-                "userid"
-            ):
-                if isinstance(value, (str, int)):
-                    if target == str(value):
-                        return True
-
-                if isinstance(value, dict):
-                    if contains_user_id(value, target):
-                        return True
-
-            if contains_user_id(value, target):
-                return True
-
-    elif isinstance(obj, list):
-
-        for item in obj:
-            if contains_user_id(item, target):
-                return True
-
-    elif isinstance(obj, str):
-
-        if obj.endswith("/users/" + target):
-            return True
-
-    return False
-
-
-def extract_join_request_id(obj):
-    if not isinstance(obj, dict):
-        return None
-
-    possible_keys = (
-        "joinRequestId",
-        "join_request_id",
-        "id"
-    )
-
-    for key in possible_keys:
-
-        value = obj.get(key)
-
-        if value:
-            return str(value)
-
-    for key in ("path", "name"):
-
-        value = obj.get(key)
-
-        if value and "join-requests/" in str(value):
-            return str(value).split("join-requests/")[-1].split("/")[0]
-
-    return None
-
-
-def search_join_request(data, roblox_id):
-    if isinstance(data, dict):
-
-        if contains_user_id(data, roblox_id):
-
-            request_id = extract_join_request_id(data)
-
-            if request_id:
-                return request_id
-
-        for value in data.values():
-
-            result = search_join_request(value, roblox_id)
-
-            if result:
-                return result
-
-    elif isinstance(data, list):
-
-        for item in data:
-
-            result = search_join_request(item, roblox_id)
-
-            if result:
-                return result
-
-    return None
-
-
-def get_join_request_id(roblox_id):
-    if not ROBLOX_OPEN_CLOUD_KEY:
-        raise RuntimeError(
-            "ROBLOX_OPEN_CLOUD_KEY is not configured."
-        )
-
-    url = (
-        f"https://apis.roblox.com/cloud/v2/groups/"
-        f"{ROBLOX_GROUP_ID}/join-requests"
-    )
-
-    response = requests.get(
-        url,
-        headers=roblox_headers(),
-        timeout=15
-    )
-
-    if not response.ok:
-     raise RuntimeError(
-        f"Roblox API returned {response.status_code}: {response.text}"
-    )
-
-    data = response.json()
-
-    return search_join_request(
-        data,
-        roblox_id
-    )
-
-
-def accept_roblox_join_request(roblox_id):
-    if not ROBLOX_OPEN_CLOUD_KEY:
-        raise RuntimeError(
-            "ROBLOX_OPEN_CLOUD_KEY is not configured."
-        )
-
-    # Roblox join_request_id is the requesting user's Roblox ID
-    join_request_id = str(roblox_id)
-
-    url = (
-        f"https://apis.roblox.com/cloud/v2/groups/"
-        f"{ROBLOX_GROUP_ID}/join-requests/"
-        f"{join_request_id}:accept"
-    )
-
-    response = requests.post(
-        url,
-        headers=roblox_headers(),
-        json={},
-        timeout=15
-    )
-
-    if response.status_code in (200, 201, 204):
-        return True, "Roblox group request accepted."
-
-    if response.status_code == 404:
-        return False, (
-            "No pending Roblox group request was found "
-            "for this applicant."
-        )
-
-    return False, (
-        f"Roblox returned HTTP {response.status_code}: "
-        f"{response.text[:500]}"
-    )
-
-
-def decline_roblox_join_request(roblox_id):
-    if not ROBLOX_OPEN_CLOUD_KEY:
-        raise RuntimeError(
-            "ROBLOX_OPEN_CLOUD_KEY is not configured."
-        )
-
-    join_request_id = str(roblox_id)
-
-    url = (
-        f"https://apis.roblox.com/cloud/v2/groups/"
-        f"{ROBLOX_GROUP_ID}/join-requests/"
-        f"{join_request_id}:decline"
-    )
-
-    response = requests.post(
-        url,
-        headers=roblox_headers(),
-        json={},
-        timeout=15
-    )
-
-    if response.status_code in (200, 201, 204):
-        return True, "Roblox group request declined."
-
-    if response.status_code == 404:
-        return True, "No pending Roblox group request existed."
-
-    return False, (
-        f"Roblox returned HTTP {response.status_code}: "
-        f"{response.text[:500]}"
-    )
-
-
-def save_review(
-    discord_id,
-    status,
-    reviewer_id,
-    reason=""
-):
+def save_review(discord_id, status, reviewer_id, reason=""):
     execute(
         """
         INSERT OR REPLACE INTO whitelist_reviews
@@ -409,24 +119,77 @@ def save_review(
     )
 
 
-async def get_user(bot, discord_id):
-    user = bot.get_user(
-        int(discord_id)
+def save_review_message(message_id, applicant_discord_id):
+    execute(
+        """
+        INSERT OR REPLACE INTO whitelist_review_messages
+        (
+            message_id,
+            applicant_discord_id,
+            created_at
+        )
+        VALUES (?, ?, ?)
+        """,
+        (
+            str(message_id),
+            str(applicant_discord_id),
+            int(time.time())
+        )
     )
+
+
+def delete_review_message(message_id):
+    execute(
+        """
+        DELETE FROM whitelist_review_messages
+        WHERE message_id=?
+        """,
+        (str(message_id),)
+    )
+
+
+def get_applicant_id_from_message(message):
+    # Primary lookup: persistent SQLite mapping.
+    row = query_one(
+        """
+        SELECT applicant_discord_id
+        FROM whitelist_review_messages
+        WHERE message_id=?
+        """,
+        (str(message.id),)
+    )
+
+    if row:
+        return int(row[0])
+
+    # Fallback for older messages created before the mapping existed.
+    for embed in reversed(message.embeds):
+        footer = embed.footer.text or ""
+
+        match = re.search(
+            r"Applicant ID:\s*(\d+)",
+            footer
+        )
+
+        if match:
+            applicant_id = int(match.group(1))
+            save_review_message(message.id, applicant_id)
+            return applicant_id
+
+    return None
+
+
+async def get_user(bot, discord_id):
+    user = bot.get_user(int(discord_id))
 
     if user:
         return user
 
-    return await bot.fetch_user(
-        int(discord_id)
-    )
+    return await bot.fetch_user(int(discord_id))
 
 
 def staff_allowed(interaction):
-    if not isinstance(
-        interaction.user,
-        discord.Member
-    ):
+    if not isinstance(interaction.user, discord.Member):
         return False
 
     return (
@@ -435,50 +198,288 @@ def staff_allowed(interaction):
     )
 
 
-# --------------------------------------------------
-# Request Changes modal
-# --------------------------------------------------
+# ============================================================
+# ROBLOX HELPERS
+# ============================================================
+
+def get_roblox_user_id(discord_id):
+    # First try the profile URL from question 2.
+    profile = get_answer(discord_id, 1)
+
+    if profile:
+        match = re.search(
+            r"roblox\.com/users/(\d+)",
+            profile,
+            re.IGNORECASE
+        )
+
+        if match:
+            return int(match.group(1))
+
+    # Fallback to the exact username from question 1.
+    username = get_answer(discord_id, 0)
+
+    if not username:
+        return None
+
+    username = username.strip()
+
+    try:
+        roblox_id = fetch_roblox_id(username)
+
+        if roblox_id:
+            return int(roblox_id)
+
+    except Exception as error:
+        print(
+            f"Failed to resolve Roblox user '{username}': {error}"
+        )
+
+    return None
+
+
+def roblox_headers():
+    if not ROBLOX_OPEN_CLOUD_KEY:
+        raise RuntimeError(
+            "ROBLOX_OPEN_CLOUD_KEY is not configured."
+        )
+
+    return {
+        "x-api-key": ROBLOX_OPEN_CLOUD_KEY,
+        "Content-Type": "application/json"
+    }
+
+
+def _extract_join_requests(data):
+    """
+    Roblox's response shape may change while this endpoint is beta.
+    Find likely request objects without hardcoding only one wrapper name.
+    """
+    if isinstance(data, list):
+        return data
+
+    if not isinstance(data, dict):
+        return []
+
+    for key in (
+        "groupJoinRequests",
+        "joinRequests",
+        "group_join_requests",
+        "join_requests",
+        "data",
+    ):
+        value = data.get(key)
+
+        if isinstance(value, list):
+            return value
+
+    return []
+
+
+def _find_user_id_in_request(item):
+    if not isinstance(item, dict):
+        return None
+
+    # Common direct fields.
+    for key in (
+        "userId",
+        "user_id",
+        "requesterUserId",
+        "requester_user_id",
+    ):
+        value = item.get(key)
+
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                pass
+
+    # Nested user/requester objects.
+    for key in ("user", "requester"):
+        value = item.get(key)
+
+        if isinstance(value, dict):
+            for id_key in ("id", "userId", "user_id"):
+                nested = value.get(id_key)
+
+                if nested is not None:
+                    try:
+                        return int(nested)
+                    except (TypeError, ValueError):
+                        pass
+
+        if isinstance(value, str):
+            match = re.search(r"/users/(\d+)", value)
+
+            if match:
+                return int(match.group(1))
+
+    # Search resource-name strings.
+    for key in ("name", "path"):
+        value = item.get(key)
+
+        if isinstance(value, str):
+            match = re.search(r"/users/(\d+)", value)
+
+            if match:
+                return int(match.group(1))
+
+    return None
+
+
+def _extract_join_request_id(item):
+    if not isinstance(item, dict):
+        return None
+
+    for key in (
+        "joinRequestId",
+        "join_request_id",
+        "id",
+    ):
+        value = item.get(key)
+
+        if value is not None:
+            return str(value)
+
+    for key in ("name", "path"):
+        value = item.get(key)
+
+        if isinstance(value, str):
+            match = re.search(
+                r"join-requests/([^/:]+)",
+                value
+            )
+
+            if match:
+                return match.group(1)
+
+    return None
+
+
+def get_join_request_id(roblox_id):
+    """
+    Lists pending requests and matches the applicant by Roblox user ID.
+    """
+    url = (
+        f"https://apis.roblox.com/cloud/v2/groups/"
+        f"{ROBLOX_GROUP_ID}/join-requests"
+    )
+
+    response = requests.get(
+        url,
+        headers=roblox_headers(),
+        timeout=15
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Roblox API returned {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    data = response.json()
+    requests_list = _extract_join_requests(data)
+
+    for item in requests_list:
+        item_user_id = _find_user_id_in_request(item)
+
+        if item_user_id == int(roblox_id):
+            request_id = _extract_join_request_id(item)
+
+            if request_id:
+                return request_id
+
+    return None
+
+
+def accept_roblox_join_request(roblox_id):
+    join_request_id = get_join_request_id(roblox_id)
+
+    if not join_request_id:
+        return False, (
+            "No pending Roblox group request was found "
+            "for this applicant."
+        )
+
+    url = (
+        f"https://apis.roblox.com/cloud/v2/groups/"
+        f"{ROBLOX_GROUP_ID}/join-requests/"
+        f"{join_request_id}:accept"
+    )
+
+    response = requests.post(
+        url,
+        headers=roblox_headers(),
+        json={},
+        timeout=15
+    )
+
+    if response.status_code in (200, 201, 204):
+        return True, "Roblox group request accepted."
+
+    return False, (
+        f"Roblox returned HTTP {response.status_code}: "
+        f"{response.text[:500]}"
+    )
+
+
+def decline_roblox_join_request(roblox_id):
+    join_request_id = get_join_request_id(roblox_id)
+
+    if not join_request_id:
+        return True, "No pending Roblox group request existed."
+
+    url = (
+        f"https://apis.roblox.com/cloud/v2/groups/"
+        f"{ROBLOX_GROUP_ID}/join-requests/"
+        f"{join_request_id}:decline"
+    )
+
+    response = requests.post(
+        url,
+        headers=roblox_headers(),
+        json={},
+        timeout=15
+    )
+
+    if response.status_code in (200, 201, 204):
+        return True, "Roblox group request declined."
+
+    return False, (
+        f"Roblox returned HTTP {response.status_code}: "
+        f"{response.text[:500]}"
+    )
+
+
+# ============================================================
+# REQUEST CHANGES
+# ============================================================
 
 class RequestChangesModal(
     discord.ui.Modal,
     title="Request Application Changes"
 ):
-
     request_text = discord.ui.TextInput(
         label="What should the applicant change?",
         placeholder=(
-            "Example: Please provide more detail "
-            "about your character's background."
+            "Example: Please provide more detail about "
+            "your character's background."
         ),
         style=discord.TextStyle.paragraph,
         required=True,
         max_length=1500
     )
 
-    def __init__(
-        self,
-        bot,
-        applicant_id,
-        review_message
-    ):
+    def __init__(self, bot, applicant_id, review_message):
         super().__init__()
 
         self.bot = bot
         self.applicant_id = applicant_id
         self.review_message = review_message
 
-    async def on_submit(
-        self,
-        interaction: discord.Interaction
-    ):
+    async def on_submit(self, interaction: discord.Interaction):
         question = self.request_text.value.strip()
-
-        save_review(
-            self.applicant_id,
-            "changes_required",
-            interaction.user.id,
-            question
-        )
 
         applicant = await get_user(
             self.bot,
@@ -511,12 +512,20 @@ class RequestChangesModal(
 
         try:
             await applicant.send(embed=embed)
+
         except discord.Forbidden:
             await interaction.response.send_message(
                 "The applicant has DMs disabled.",
                 ephemeral=True
             )
             return
+
+        save_review(
+            self.applicant_id,
+            "changes_required",
+            interaction.user.id,
+            question
+        )
 
         await interaction.response.send_message(
             "✅ Change request sent. Waiting for their response.",
@@ -558,7 +567,6 @@ async def wait_for_change_response(
         )
 
     except asyncio.TimeoutError:
-
         try:
             await applicant.send(
                 "⏰ Your requested-changes response expired. "
@@ -571,7 +579,6 @@ async def wait_for_change_response(
         return
 
     answer = response.content.strip()
-
     review_channel = review_message.channel
 
     embed = discord.Embed(
@@ -600,27 +607,15 @@ async def wait_for_change_response(
         )
     )
 
-    review_message = await review_channel.send(
-    embed=final_embed,
-    view=ReviewView(bot)
-)
+    new_review_message = await review_channel.send(
+        embed=embed,
+        view=ReviewView(bot)
+    )
 
-    execute(
-    """
-    INSERT OR REPLACE INTO whitelist_review_messages
-    (
-        message_id,
-        applicant_discord_id,
-        created_at
+    save_review_message(
+        new_review_message.id,
+        applicant.id
     )
-    VALUES (?, ?, ?)
-    """,
-    (
-        str(review_message.id),
-        str(user.id),
-        int(time.time())
-    )
-)
 
     save_review(
         applicant.id,
@@ -633,45 +628,35 @@ async def wait_for_change_response(
         await applicant.send(
             "✅ Your response has been sent back to Ensford staff."
         )
+
     except Exception:
         pass
 
 
-# --------------------------------------------------
-# Denial modal
-# --------------------------------------------------
+# ============================================================
+# DENY MODAL
+# ============================================================
 
 class DenyModal(
     discord.ui.Modal,
     title="Deny Whitelist Application"
 ):
-
     reason = discord.ui.TextInput(
         label="Reason for denial",
-        placeholder=(
-            "Explain why the application is being denied."
-        ),
+        placeholder="Explain why the application is being denied.",
         style=discord.TextStyle.paragraph,
         required=True,
         max_length=1500
     )
 
-    def __init__(
-        self,
-        bot,
-        applicant_id,
-        review_message
-    ):
+    def __init__(self, bot, applicant_id, review_message):
         super().__init__()
 
         self.bot = bot
         self.applicant_id = applicant_id
         self.review_message = review_message
 
-    async def on_submit(
-        self,
-        interaction: discord.Interaction
-    ):
+    async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(
             ephemeral=True
         )
@@ -688,11 +673,10 @@ class DenyModal(
 
         if roblox_id:
             try:
-                _, roblox_message = (
-                    decline_roblox_join_request(
-                        roblox_id
-                    )
+                _, roblox_message = decline_roblox_join_request(
+                    roblox_id
                 )
+
             except Exception as error:
                 roblox_message = (
                     f"Roblox decline failed: {error}"
@@ -726,6 +710,7 @@ class DenyModal(
 
         try:
             await applicant.send(embed=embed)
+
         except Exception:
             pass
 
@@ -752,47 +737,40 @@ class DenyModal(
             view=None
         )
 
+        delete_review_message(
+            self.review_message.id
+        )
+
         await interaction.followup.send(
             "Application denied.",
             ephemeral=True
         )
 
 
-# --------------------------------------------------
-# Accept note modal
-# --------------------------------------------------
+# ============================================================
+# ACCEPT MODAL
+# ============================================================
 
 class AcceptModal(
     discord.ui.Modal,
     title="Accept Whitelist Application"
 ):
-
     note = discord.ui.TextInput(
         label="Acceptance note",
-        placeholder=(
-            "Optional message for the applicant."
-        ),
+        placeholder="Optional message for the applicant.",
         style=discord.TextStyle.paragraph,
         required=False,
         max_length=1000
     )
 
-    def __init__(
-        self,
-        bot,
-        applicant_id,
-        review_message
-    ):
+    def __init__(self, bot, applicant_id, review_message):
         super().__init__()
 
         self.bot = bot
         self.applicant_id = applicant_id
         self.review_message = review_message
 
-    async def on_submit(
-        self,
-        interaction: discord.Interaction
-    ):
+    async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(
             ephemeral=True
         )
@@ -803,8 +781,8 @@ class AcceptModal(
 
         if not roblox_id:
             await interaction.followup.send(
-                "❌ I couldn't determine the applicant's "
-                "Roblox User ID. Check their Roblox profile answer.",
+                "❌ I couldn't determine the applicant's Roblox "
+                "User ID. Check their Roblox username/profile answer.",
                 ephemeral=True
             )
             return
@@ -825,7 +803,7 @@ class AcceptModal(
 
         if not success:
             await interaction.followup.send(
-                f"❌ Could not accept the Roblox group request.\n"
+                "❌ Could not accept the Roblox group request.\n"
                 f"{roblox_message}",
                 ephemeral=True
             )
@@ -840,6 +818,7 @@ class AcceptModal(
                 member = await interaction.guild.fetch_member(
                     self.applicant_id
                 )
+
             except Exception:
                 member = None
 
@@ -932,6 +911,7 @@ class AcceptModal(
             await applicant.send(
                 embed=accepted_embed
             )
+
         except Exception:
             pass
 
@@ -958,6 +938,10 @@ class AcceptModal(
             view=None
         )
 
+        delete_review_message(
+            self.review_message.id
+        )
+
         await interaction.followup.send(
             "✅ Application accepted. Roblox group request "
             "accepted and Resident role added.",
@@ -965,17 +949,13 @@ class AcceptModal(
         )
 
 
-# --------------------------------------------------
-# Staff review buttons
-# --------------------------------------------------
+# ============================================================
+# STAFF REVIEW BUTTONS
+# ============================================================
 
 class ReviewView(discord.ui.View):
-
     def __init__(self, bot):
-        super().__init__(
-            timeout=None
-        )
-
+        super().__init__(timeout=None)
         self.bot = bot
 
     @discord.ui.button(
@@ -1090,17 +1070,13 @@ class ReviewView(discord.ui.View):
         )
 
 
-# --------------------------------------------------
-# Application confirmation
-# --------------------------------------------------
+# ============================================================
+# APPLICATION CONFIRMATION
+# ============================================================
 
 class ConfirmApplicationView(discord.ui.View):
-
     def __init__(self, bot):
-        super().__init__(
-            timeout=300
-        )
-
+        super().__init__(timeout=300)
         self.bot = bot
 
     @discord.ui.button(
@@ -1125,7 +1101,6 @@ class ConfirmApplicationView(discord.ui.View):
         )
 
         if existing:
-
             started_at, current_question, status = existing
 
             if (
@@ -1214,17 +1189,13 @@ class ConfirmApplicationView(discord.ui.View):
         )
 
 
-# --------------------------------------------------
-# Public panel
-# --------------------------------------------------
+# ============================================================
+# PUBLIC APPLICATION PANEL
+# ============================================================
 
 class ApplicationPanelView(discord.ui.View):
-
     def __init__(self, bot):
-        super().__init__(
-            timeout=None
-        )
-
+        super().__init__(timeout=None)
         self.bot = bot
 
     @discord.ui.button(
@@ -1239,7 +1210,6 @@ class ApplicationPanelView(discord.ui.View):
         button: discord.ui.Button
     ):
         try:
-
             dm = (
                 interaction.user.dm_channel
                 or await interaction.user.create_dm()
@@ -1254,7 +1224,8 @@ class ApplicationPanelView(discord.ui.View):
                     "You will have **3 hours** to complete the "
                     "application. If you do not complete it in "
                     "time, you will have to restart.\n\n"
-                    "You may cancel at any time."
+                    "If you wish to stop the application, "
+                    "you may cancel at any time."
                 ),
                 color=discord.Color.blue()
             )
@@ -1276,7 +1247,6 @@ class ApplicationPanelView(discord.ui.View):
             )
 
         except discord.Forbidden:
-
             await interaction.response.send_message(
                 "I couldn't DM you. Enable server DMs "
                 "and try again.",
@@ -1284,17 +1254,12 @@ class ApplicationPanelView(discord.ui.View):
             )
 
 
-# --------------------------------------------------
-# Question system
-# --------------------------------------------------
+# ============================================================
+# QUESTION SYSTEM
+# ============================================================
 
-async def ask_questions(
-    bot,
-    user
-):
-    discord_id = str(
-        user.id
-    )
+async def ask_questions(bot, user):
+    discord_id = str(user.id)
 
     application = query_one(
         """
@@ -1322,9 +1287,7 @@ async def ask_questions(
         current_question,
         len(QUESTIONS)
     ):
-
         if expired(started_at):
-
             execute(
                 """
                 UPDATE whitelist_applications
@@ -1382,7 +1345,6 @@ async def ask_questions(
             )
 
         try:
-
             message = await bot.wait_for(
                 "message",
                 timeout=remaining,
@@ -1390,7 +1352,6 @@ async def ask_questions(
             )
 
         except asyncio.TimeoutError:
-
             execute(
                 """
                 UPDATE whitelist_applications
@@ -1408,11 +1369,7 @@ async def ask_questions(
 
             return
 
-        if (
-            message.content.strip().lower()
-            == "cancel"
-        ):
-
+        if message.content.strip().lower() == "cancel":
             execute(
                 """
                 UPDATE whitelist_applications
@@ -1467,17 +1424,12 @@ async def ask_questions(
     )
 
 
-# --------------------------------------------------
-# Submit to staff
-# --------------------------------------------------
+# ============================================================
+# SUBMIT APPLICATION TO STAFF
+# ============================================================
 
-async def submit_application(
-    bot,
-    user
-):
-    discord_id = str(
-        user.id
-    )
+async def submit_application(bot, user):
+    discord_id = str(user.id)
 
     execute(
         """
@@ -1495,7 +1447,6 @@ async def submit_application(
     )
 
     if not review_channel:
-
         review_channel = await bot.fetch_channel(
             APPLICATION_REVIEW_CHANNEL_ID
         )
@@ -1515,8 +1466,11 @@ async def submit_application(
         url=user.display_avatar.url
     )
 
-    # Discord embeds have overall limits,
-    # so split the application into pages.
+    await review_channel.send(
+        embed=main_embed
+    )
+
+    # Split answers across multiple embeds to stay within Discord limits.
     page_embeds = []
 
     for page_start in range(
@@ -1524,7 +1478,6 @@ async def submit_application(
         len(QUESTIONS),
         4
     ):
-
         page = discord.Embed(
             color=discord.Color.gold()
         )
@@ -1536,7 +1489,6 @@ async def submit_application(
                 len(QUESTIONS)
             )
         ):
-
             answer = (
                 get_answer(
                     discord_id,
@@ -1554,13 +1506,7 @@ async def submit_application(
                 inline=False
             )
 
-        page_embeds.append(
-            page
-        )
-
-    await review_channel.send(
-        embed=main_embed
-    )
+        page_embeds.append(page)
 
     for page in page_embeds[:-1]:
         await review_channel.send(
@@ -1570,32 +1516,18 @@ async def submit_application(
     final_embed = page_embeds[-1]
 
     final_embed.set_footer(
-        text=(
-            f"Applicant ID: {user.id}"
-        )
+        text=f"Applicant ID: {user.id}"
     )
 
     new_review_message = await review_channel.send(
-    embed=embed,
-    view=ReviewView(bot)
-)
+        embed=final_embed,
+        view=ReviewView(bot)
+    )
 
-    execute(
-    """
-    INSERT OR REPLACE INTO whitelist_review_messages
-    (
-        message_id,
-        applicant_discord_id,
-        created_at
+    save_review_message(
+        new_review_message.id,
+        user.id
     )
-    VALUES (?, ?, ?)
-    """,
-    (
-        str(new_review_message.id),
-        str(applicant.id),
-        int(time.time())
-    )
-)
 
     finished = discord.Embed(
         title="✅ Application Submitted",
@@ -1613,26 +1545,23 @@ async def submit_application(
     )
 
 
-# --------------------------------------------------
-# Cog
-# --------------------------------------------------
+# ============================================================
+# COG
+# ============================================================
 
 class Whitelist(commands.Cog):
-
-    def __init__(
-        self,
-        bot
-    ):
+    def __init__(self, bot):
         self.bot = bot
 
     async def cog_load(self):
-        # Persistent buttons survive Render restarts.
+        # Persistent public panel buttons.
         self.bot.add_view(
             ApplicationPanelView(
                 self.bot
             )
         )
 
+        # Persistent review buttons.
         self.bot.add_view(
             ReviewView(
                 self.bot
@@ -1652,27 +1581,19 @@ class Whitelist(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
-
         embed = discord.Embed(
             title="Ensford Whitelist Applications",
             description=(
-               "Interested in becoming a whitelisted member of Ensford?\n\n"
-
-
-
-            "Press Start Application below to begin.\n\n"
-
-
-
-"The application will take place in your DMs.\n"
-
-
-
-"You will have 3 hours to complete it.\n"
-
-
-
-"To join our community, you must fill out the Whitelist Application provided below and be approved by an Administrator before you can attend server startups. It is recommended that you review the Community Guidelines below to understand what you are getting into. You will be tested on specific rules in the Whitelist Application. Ensford is a 16+ voice chat community\n"
+                "Interested in becoming a whitelisted member of Ensford?\n\n"
+                "Press **Start Application** below to begin.\n\n"
+                "The application will take place in your DMs.\n"
+                "You will have **3 hours** to complete it.\n\n"
+                "To join our community, you must fill out the "
+                "Whitelist Application and be approved by an "
+                "Administrator before attending server startups.\n\n"
+                "Ensford is a **16+ voice chat community**. "
+                "It is recommended that you review the Community "
+                "Guidelines before applying."
             ),
             color=discord.Color.blue()
         )

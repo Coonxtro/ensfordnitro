@@ -150,32 +150,31 @@ def delete_review_message(message_id):
 
 
 def get_applicant_id_from_message(message):
-    # Primary lookup: persistent SQLite mapping.
-    row = query_one(
-        """
-        SELECT applicant_discord_id
-        FROM whitelist_review_messages
-        WHERE message_id=?
-        """,
-        (str(message.id),)
-    )
+    for embed in reversed(message.embeds):
+        footer = embed.footer.text or ""
 
-    if row:
-        return int(row[0])
+        match = re.search(r"A:(\d+)", footer)
 
-    # Fallback for older messages created before the mapping existed.
+        if match:
+            return int(match.group(1))
+
+    return None
+
+
+def get_roblox_id_from_message(message):
     for embed in reversed(message.embeds):
         footer = embed.footer.text or ""
 
         match = re.search(
-            r"Applicant ID:\s*(\d+)",
+            r"R:(\d+)",
             footer
         )
 
         if match:
-            applicant_id = int(match.group(1))
-            save_review_message(message.id, applicant_id)
-            return applicant_id
+            roblox_id = int(match.group(1))
+
+            if roblox_id != 0:
+                return roblox_id
 
     return None
 
@@ -1045,6 +1044,9 @@ class ReviewView(discord.ui.View):
         applicant_id = get_applicant_id_from_message(
             interaction.message
         )
+        roblox_id = get_roblox_id_from_message(
+    interaction.message
+)
 
         if not applicant_id:
             await interaction.response.send_message(
@@ -1501,6 +1503,7 @@ async def ask_questions(bot, user):
 
 async def submit_application(bot, user):
     discord_id = str(user.id)
+    roblox_id = get_roblox_user_id(user.id)
 
     execute(
         """
@@ -1590,8 +1593,8 @@ async def submit_application(bot, user):
 
     final_embed.set_footer(
     text=(
-        f"Applicant ID: {user.id} | "
-        f"Roblox ID: {roblox_id if roblox_id else 'Unknown'}"
+        f"A:{user.id}|"
+        f"R:{roblox_id if roblox_id else 0}"
     )
 )
 

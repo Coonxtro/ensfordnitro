@@ -374,53 +374,90 @@ def _extract_join_request_id(item):
 
 
 def get_join_request_id(roblox_id):
-    url = (
+    base_url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
         f"{ROBLOX_GROUP_ID}/join-requests"
     )
 
-    response = requests.get(
-        url,
-        headers=roblox_headers(),
-        timeout=15
-    )
+    page_token = None
+    pages_checked = 0
 
-    if not response.ok:
-        raise RuntimeError(
-            f"Roblox list requests returned "
-            f"{response.status_code}: {response.text[:1000]}"
+    while True:
+        params = {}
+
+        if page_token:
+            params["pageToken"] = page_token
+
+        response = requests.get(
+            base_url,
+            headers=roblox_headers(),
+            params=params,
+            timeout=15
         )
 
-    data = response.json()
+        if not response.ok:
+            raise RuntimeError(
+                f"Roblox list requests returned "
+                f"{response.status_code}: "
+                f"{response.text[:1000]}"
+            )
 
-    requests_list = data.get(
-        "groupJoinRequests",
-        []
-    )
+        data = response.json()
 
-    for item in requests_list:
-        item_user_id = _find_user_id_in_request(item)
+        requests_list = data.get(
+            "groupJoinRequests",
+            []
+        )
 
-        if item_user_id == int(roblox_id):
-            request_id = _extract_join_request_id(item)
+        pages_checked += 1
 
-            if request_id:
-                return request_id
+        for item in requests_list:
+            user_value = item.get("user", "")
+
+            match = re.search(
+                r"users/(\d+)",
+                user_value
+            )
+
+            if not match:
+                continue
+
+            item_user_id = int(
+                match.group(1)
+            )
+
+            if item_user_id == int(roblox_id):
+                path = item.get("path", "")
+
+                request_match = re.search(
+                    r"join-requests/(\d+)",
+                    path
+                )
+
+                if request_match:
+                    return request_match.group(1)
+
+        page_token = data.get(
+            "nextPageToken"
+        )
+
+        if not page_token:
+            break
+
+        # Safety limit so something weird can't loop forever.
+        if pages_checked >= 50:
+            break
 
     raise RuntimeError(
-        "Could not match applicant to a pending request.\n"
-        f"Applicant Roblox ID: {roblox_id}"
+        f"No pending group request found for Roblox ID "
+        f"{roblox_id} after checking {pages_checked} pages."
     )
 
 
 def accept_roblox_join_request(roblox_id):
-    join_request_id = get_join_request_id(roblox_id)
-
-    if not join_request_id:
-        raise RuntimeError(
-            f"No matching join request was found.\n"
-            f"Applicant Roblox ID: {roblox_id}"
-        )
+    join_request_id = get_join_request_id(
+        roblox_id
+    )
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
@@ -435,11 +472,16 @@ def accept_roblox_join_request(roblox_id):
         timeout=15
     )
 
-    if response.status_code in (200, 201, 204):
+    if response.status_code in (
+        200,
+        201,
+        204
+    ):
         return True, "Roblox group request accepted."
 
     raise RuntimeError(
-        f"Roblox accept returned {response.status_code}: "
+        f"Roblox accept returned "
+        f"{response.status_code}: "
         f"{response.text[:1000]}"
     )
 

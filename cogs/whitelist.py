@@ -2,7 +2,6 @@ import os
 import re
 import time
 import asyncio
-from discord import user
 import requests
 import discord
 
@@ -150,31 +149,32 @@ def delete_review_message(message_id):
 
 
 def get_applicant_id_from_message(message):
-    for embed in reversed(message.embeds):
-        footer = embed.footer.text or ""
+    # Primary lookup: persistent SQLite mapping.
+    row = query_one(
+        """
+        SELECT applicant_discord_id
+        FROM whitelist_review_messages
+        WHERE message_id=?
+        """,
+        (str(message.id),)
+    )
 
-        match = re.search(r"A:(\d+)", footer)
+    if row:
+        return int(row[0])
 
-        if match:
-            return int(match.group(1))
-
-    return None
-
-
-def get_roblox_id_from_message(message):
+    # Fallback for older messages created before the mapping existed.
     for embed in reversed(message.embeds):
         footer = embed.footer.text or ""
 
         match = re.search(
-            r"R:(\d+)",
+            r"Applicant ID:\s*(\d+)",
             footer
         )
 
         if match:
-            roblox_id = int(match.group(1))
-
-            if roblox_id != 0:
-                return roblox_id
+            applicant_id = int(match.group(1))
+            save_review_message(message.id, applicant_id)
+            return applicant_id
 
     return None
 
@@ -202,32 +202,7 @@ def staff_allowed(interaction):
 # ROBLOX HELPERS
 # ============================================================
 
-def get_roblox_id_from_message(message):
-    for embed in reversed(message.embeds):
-        footer = embed.footer.text or ""
-
-        match = re.search(
-            r"Roblox ID:\s*(\d+)",
-            footer
-        )
-
-        if match:
-            return int(match.group(1))
-
-    return None
-
 def get_roblox_user_id(discord_id):
-    linked = query_one(
-        """
-        SELECT roblox_id
-        FROM verify
-        WHERE discord_id=?
-        """,
-        (str(discord_id),)
-    )
-
-    if linked and linked[0]:
-        return int(linked[0])
     # First try the profile URL from question 2.
     profile = get_answer(discord_id, 1)
 
@@ -305,22 +280,12 @@ def _find_user_id_in_request(item):
     if not isinstance(item, dict):
         return None
 
-    # Roblox currently returns:
-    # "user": "users/543040"
-    user_value = item.get("user")
-
-    if isinstance(user_value, str):
-        match = re.search(r"users/(\d+)", user_value)
-
-        if match:
-            return int(match.group(1))
-
-    # Fallbacks in case Roblox changes the response later
+    # Common direct fields.
     for key in (
         "userId",
         "user_id",
         "requesterUserId",
-        "requester_user_id"
+        "requester_user_id",
     ):
         value = item.get(key)
 
@@ -330,15 +295,35 @@ def _find_user_id_in_request(item):
             except (TypeError, ValueError):
                 pass
 
-    if isinstance(user_value, dict):
-        for key in ("id", "userId", "user_id"):
-            value = user_value.get(key)
+    # Nested user/requester objects.
+    for key in ("user", "requester"):
+        value = item.get(key)
 
-            if value is not None:
-                try:
-                    return int(value)
-                except (TypeError, ValueError):
-                    pass
+        if isinstance(value, dict):
+            for id_key in ("id", "userId", "user_id"):
+                nested = value.get(id_key)
+
+                if nested is not None:
+                    try:
+                        return int(nested)
+                    except (TypeError, ValueError):
+                        pass
+
+        if isinstance(value, str):
+            match = re.search(r"/users/(\d+)", value)
+
+            if match:
+                return int(match.group(1))
+
+    # Search resource-name strings.
+    for key in ("name", "path"):
+        value = item.get(key)
+
+        if isinstance(value, str):
+            match = re.search(r"/users/(\d+)", value)
+
+            if match:
+                return int(match.group(1))
 
     return None
 
@@ -347,116 +332,75 @@ def _extract_join_request_id(item):
     if not isinstance(item, dict):
         return None
 
-    path = item.get("path")
-
-    if isinstance(path, str):
-        match = re.search(
-            r"join-requests/(\d+)",
-            path
-        )
-
-        if match:
-            return match.group(1)
-
-    # Fallbacks
     for key in (
         "joinRequestId",
         "join_request_id",
-        "id"
+        "id",
     ):
         value = item.get(key)
 
         if value is not None:
             return str(value)
 
+    for key in ("name", "path"):
+        value = item.get(key)
+
+        if isinstance(value, str):
+            match = re.search(
+                r"join-requests/([^/:]+)",
+                value
+            )
+
+            if match:
+                return match.group(1)
+
     return None
 
 
 def get_join_request_id(roblox_id):
-    base_url = (
+    """
+    Lists pending requests and matches the applicant by Roblox user ID.
+    """
+    url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
         f"{ROBLOX_GROUP_ID}/join-requests"
     )
 
-    page_token = None
-    pages_checked = 0
-
-    while True:
-        params = {}
-
-        if page_token:
-            params["pageToken"] = page_token
-
-        response = requests.get(
-            base_url,
-            headers=roblox_headers(),
-            params=params,
-            timeout=15
-        )
-
-        if not response.ok:
-            raise RuntimeError(
-                f"Roblox list requests returned "
-                f"{response.status_code}: "
-                f"{response.text[:1000]}"
-            )
-
-        data = response.json()
-
-        requests_list = data.get(
-            "groupJoinRequests",
-            []
-        )
-
-        pages_checked += 1
-
-        for item in requests_list:
-            user_value = item.get("user", "")
-
-            match = re.search(
-                r"users/(\d+)",
-                user_value
-            )
-
-            if not match:
-                continue
-
-            item_user_id = int(
-                match.group(1)
-            )
-
-            if item_user_id == int(roblox_id):
-                path = item.get("path", "")
-
-                request_match = re.search(
-                    r"join-requests/(\d+)",
-                    path
-                )
-
-                if request_match:
-                    return request_match.group(1)
-
-        page_token = data.get(
-            "nextPageToken"
-        )
-
-        if not page_token:
-            break
-
-        # Safety limit so something weird can't loop forever.
-        if pages_checked >= 50:
-            break
-
-    raise RuntimeError(
-        f"No pending group request found for Roblox ID "
-        f"{roblox_id} after checking {pages_checked} pages."
+    response = requests.get(
+        url,
+        headers=roblox_headers(),
+        timeout=15
     )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Roblox API returned {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    data = response.json()
+    requests_list = _extract_join_requests(data)
+
+    for item in requests_list:
+        item_user_id = _find_user_id_in_request(item)
+
+        if item_user_id == int(roblox_id):
+            request_id = _extract_join_request_id(item)
+
+            if request_id:
+                return request_id
+
+    return None
 
 
 def accept_roblox_join_request(roblox_id):
-    join_request_id = get_join_request_id(
-        roblox_id
-    )
+    join_request_id = get_join_request_id(roblox_id)
+
+    if not join_request_id:
+        return False, (
+            "No pending Roblox group request was found "
+            "for this applicant."
+        )
 
     url = (
         f"https://apis.roblox.com/cloud/v2/groups/"
@@ -471,17 +415,12 @@ def accept_roblox_join_request(roblox_id):
         timeout=15
     )
 
-    if response.status_code in (
-        200,
-        201,
-        204
-    ):
+    if response.status_code in (200, 201, 204):
         return True, "Roblox group request accepted."
 
-    raise RuntimeError(
-        f"Roblox accept returned "
-        f"{response.status_code}: "
-        f"{response.text[:1000]}"
+    return False, (
+        f"Roblox returned HTTP {response.status_code}: "
+        f"{response.text[:500]}"
     )
 
 
@@ -724,7 +663,24 @@ class DenyModal(
 
         reason = self.reason.value.strip()
 
+        roblox_id = get_roblox_user_id(
+            self.applicant_id
+        )
 
+        roblox_message = (
+            "No Roblox account could be resolved."
+        )
+
+        if roblox_id:
+            try:
+                _, roblox_message = decline_roblox_join_request(
+                    roblox_id
+                )
+
+            except Exception as error:
+                roblox_message = (
+                    f"Roblox decline failed: {error}"
+                )
 
         save_review(
             self.applicant_id,
@@ -771,6 +727,7 @@ class DenyModal(
             value=(
                 f"Denied by {interaction.user.mention}\n"
                 f"**Reason:** {reason}\n"
+                f"**Roblox:** {roblox_message}"
             )[:1024],
             inline=False
         )
@@ -806,13 +763,12 @@ class AcceptModal(
         max_length=1000
     )
 
-    def __init__(self,bot,applicant_id,review_message,roblox_id=None):
+    def __init__(self, bot, applicant_id, review_message):
         super().__init__()
 
         self.bot = bot
         self.applicant_id = applicant_id
         self.review_message = review_message
-        self.roblox_id = roblox_id
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(
@@ -1023,9 +979,6 @@ class ReviewView(discord.ui.View):
         applicant_id = get_applicant_id_from_message(
             interaction.message
         )
-        roblox_id = get_roblox_id_from_message(
-    interaction.message
-)
 
         if not applicant_id:
             await interaction.response.send_message(
@@ -1034,18 +987,13 @@ class ReviewView(discord.ui.View):
             )
             return
 
-        roblox_id = get_roblox_id_from_message(
-    interaction.message
-)
-
         await interaction.response.send_modal(
-    AcceptModal(
-        self.bot,
-        applicant_id,
-        interaction.message,
-        roblox_id
-    )
-)
+            AcceptModal(
+                self.bot,
+                applicant_id,
+                interaction.message
+            )
+        )
 
     @discord.ui.button(
         label="Deny",
@@ -1482,7 +1430,6 @@ async def ask_questions(bot, user):
 
 async def submit_application(bot, user):
     discord_id = str(user.id)
-    roblox_id = get_roblox_user_id(user.id)
 
     execute(
         """
@@ -1568,14 +1515,9 @@ async def submit_application(bot, user):
 
     final_embed = page_embeds[-1]
 
-    roblox_id = get_roblox_user_id(user.id)
-
     final_embed.set_footer(
-    text=(
-        f"A:{user.id}|"
-        f"R:{roblox_id if roblox_id else 0}"
+        text=f"Applicant ID: {user.id}"
     )
-)
 
     new_review_message = await review_channel.send(
         embed=final_embed,

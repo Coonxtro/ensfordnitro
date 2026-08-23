@@ -724,27 +724,7 @@ class DenyModal(
 
         reason = self.reason.value.strip()
 
-        roblox_id = self.roblox_id
 
-        if not roblox_id:
-            roblox_id = get_roblox_user_id(
-        self.applicant_id
-    )
-
-        roblox_message = (
-            "No Roblox account could be resolved."
-        )
-
-        if roblox_id:
-            try:
-                _, roblox_message = decline_roblox_join_request(
-                    roblox_id
-                )
-
-            except Exception as error:
-                roblox_message = (
-                    f"Roblox decline failed: {error}"
-                )
 
         save_review(
             self.applicant_id,
@@ -791,7 +771,6 @@ class DenyModal(
             value=(
                 f"Denied by {interaction.user.mention}\n"
                 f"**Reason:** {reason}\n"
-                f"**Roblox:** {roblox_message}"
             )[:1024],
             inline=False
         )
